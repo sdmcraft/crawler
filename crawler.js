@@ -1,81 +1,93 @@
-import fs from 'fs';
-import fetch from 'node-fetch';
-import cheerio from 'cheerio';
-import { URL } from 'url';
-
+const urlTable = document.getElementById('urlTable');
+const loadingSpinner = document.getElementById('loadingSpinner');
+const crawlingCompleteMessage = document.getElementById('crawlingCompleteMessage');
 const visitedUrls = new Set();
-const startUrl = 'https://www.sunstar.com/';
-const startDomain = new URL(startUrl).hostname;
+let startDomain = '';
+
+document.getElementById('crawlerForm').addEventListener('submit', async function(event) {
+    event.preventDefault();
+
+    const startUrl = document.getElementById('startUrl').value;
+    if (startUrl) {
+        loadingSpinner.style.display = 'block';
+        crawlingCompleteMessage.style.display = 'none';
+        startDomain = new URL(startUrl).hostname; // Set startDomain here
+        console.log('Starting crawl process for:', startUrl);
+        await crawlWithStartUrl(startUrl);
+        loadingSpinner.style.display = 'none';
+        crawlingCompleteMessage.style.display = 'block';
+        console.log('Crawl process completed.');
+    }
+});
+
+async function crawlWithStartUrl(url) {
+    addUrlToTable(url);
+    await crawlWebsite(url);
+
+    console.log('Crawling completed for:', url);
+}
 
 async function crawlWebsite(url) {
-
-    console.log('Crawling:', url); // Log the current URL being crawled
-
     try {
-        // Save crawled the links to a file
-        saveLinksToFile(url);
-
         if (!url.endsWith('.pdf') && !url.endsWith('docx') && !url.endsWith('mp4')) {
             const response = await fetch(url);
             const html = await response.text();
-            const $ = cheerio.load(html);
 
-            // Extract links from the webpage
-            const links = [];
-            $('a').each((index, element) => {
-                const href = $(element).attr('href');
-                if (href) {
-                    links.push(href);
-                }
-            });
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
 
-            // Crawl each unvisited link within the same domain recursively
+            const links = Array.from(doc.querySelectorAll('a')).map(element => element.getAttribute('href'));
+
             for (const link of links) {
                 let absoluteUrl = new URL(link, url).href;
-                if(absoluteUrl.endsWith('/')) {
+                if (absoluteUrl.endsWith('/')) {
                     absoluteUrl = absoluteUrl.slice(0, -1);
                 }
                 if (!visitedUrls.has(absoluteUrl) && new URL(absoluteUrl).hostname === startDomain) {
                     await crawlWithConcurrencyControl(absoluteUrl);
                 } else {
-                    console.log('Skipping:', absoluteUrl); // Log the skipped URL
+                    console.log('Skipping:', absoluteUrl);
                 }
             }
         }
     } catch (error) {
         console.error(`Error crawling ${url}:`, error);
-    } finally {
-        console.log('Crawling completed.'); // Log completion of crawling process
     }
 }
 
-// Function to crawl with concurrency control
-function crawlWithConcurrencyControl(url) {
+async function crawlWithConcurrencyControl(url) {
     if (visitedUrls.has(url) || new URL(url).hostname !== startDomain || url.includes('#')) {
-        return; // Skip crawling if the URL has already been visited or belongs to a different domain or is a anchor link
+        return;
     }
-    visitedUrls.add(url); // Mark the URL as visited
-    return new Promise(resolve => {
-        setTimeout(() => {
-            crawlWebsite(url);
-            resolve();
-        }, 2000); // Delay for 1 second before retrying
-    });
+    visitedUrls.add(url);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    await crawlWebsite(url);
 }
 
-// Function to save links to a file
-function saveLinksToFile(url) {
-    const filename = `${startDomain}_crawled_links.txt`;
+function addUrlToTable(url) {
+    const row = urlTable.insertRow();
+    const cell = row.insertCell(0);
+    cell.textContent = url;
+}
 
-    let content = `${url}\n`;
+function sortTable(column) {
+    const rows = Array.from(urlTable.rows);
+    const headerCell = rows[0].cells[column];
 
-    fs.appendFile(filename, content, (err) => {
-        if (err) {
-            console.error(`Error saving links to file: ${err}`);
+    rows.sort((rowA, rowB) => {
+        const textA = rowA.cells[column].textContent;
+        const textB = rowB.cells[column].textContent;
+        return textA.localeCompare(textB);
+    });
+
+    rows.forEach((row, index) => {
+        if (index === 0) {
+            return; // Skip header row
         }
+        urlTable.appendChild(row);
     });
+
+    headerCell.classList.toggle('sorted');
 }
 
-// Start crawling
-console.log('Crawling started.');
-crawlWithConcurrencyControl(startUrl);
+console.log('Crawler script loaded.');
